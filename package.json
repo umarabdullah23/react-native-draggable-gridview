@@ -22,6 +22,11 @@
   },
   "homepage": "https://github.com/5up-okamura/react-native-draggable-gridview#readme",
   "main": "src/index.tsx",
+  "scripts": {
+    "lint": "eslint . --ext .ts,.tsx",
+    "lint:fix": "eslint . --ext .ts,.tsx --fix",
+    "lint:fix:dry": "eslint . --ext .ts,.tsx --fix-dry-run"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/5up-okamura/react-native-draggable-gridview.git"

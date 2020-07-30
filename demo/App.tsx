@@ -1,8 +1,8 @@
-import React, { memo, useState, useCallback } from 'react'
-import { StyleSheet, View, Text, TouchableOpacity } from 'react-native'
-import { SafeAreaProvider, useSafeArea } from 'react-native-safe-area-context'
-import _ from 'lodash'
-import GridView from 'react-native-draggable-gridview'
+import _ from 'lodash';
+import React, { memo, useCallback, useState } from 'react';
+import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import GridView from 'react-native-draggable-gridview';
+import { SafeAreaProvider, useSafeArea } from 'react-native-safe-area-context';
 
 /**
  * App
@@ -12,62 +12,62 @@ export default function App() {
     <SafeAreaProvider>
       <Container />
     </SafeAreaProvider>
-  )
+  );
 }
 
 /**
  * Container
  */
 const Container = memo(() => {
-  const { top, bottom } = useSafeArea()
-  const [editing, setEditing] = useState(false)
+  const { top, bottom } = useSafeArea();
+  const [editing, setEditing] = useState(false);
   const [data, setData] = useState<Data[]>(
     Array.from(new Array(14)).map((v, i) => newData(i))
-  )
+  );
 
   const onPressEdit = useCallback(() => {
-    setEditing(!editing)
-  }, [editing])
+    setEditing(!editing);
+  }, [editing]);
 
-  const locked = useCallback((item) => item == '+', [])
+  const locked = useCallback((item) => item == '+', []);
 
   const renderLockedItem = useCallback(
     () => <LockedItem editing={editing} onPress={onPressAdd} />,
     [editing, data]
-  )
+  );
 
   const renderItem = useCallback(
     (item) => (
       <Item item={item} editing={editing} onPressDelete={onPressDelete} />
     ),
     [editing, data]
-  )
+  );
 
   const onBeginDragging = useCallback(() => !editing && setEditing(true), [
     editing,
-  ])
+  ]);
 
   const onPressCell = useCallback((item) => !editing && alert(item.color), [
     editing,
-  ])
+  ]);
 
   const onPressAdd = useCallback(
     () => !editing && setData([newData(data.length + 1), ...data]),
     [editing, data]
-  )
+  );
 
   const onReleaseCell = useCallback(
     (items: any[]) => {
-      const data1 = items.slice(1)
-      if (!_.isEqual(data, data1)) setData(data1)
+      const data1 = items.slice(1);
+      if (!_.isEqual(data, data1)) setData(data1);
     },
     [data]
-  )
+  );
 
   const onPressDelete = useCallback(
     (item: Data) => setData(data.filter((v) => v.id != item.id)),
     [data]
-  )
+  );
 
   return (
     <View style={{ flex: 1 }}>
@@ -86,31 +86,31 @@ const Container = memo(() => {
       />
       <Header top={top} editing={editing} onPress={onPressEdit} />
     </View>
-  )
-})
+  );
+});
 
 /**
  * Data
  */
-const colors = ['red', 'orange', 'green', 'cyan', 'blue', 'purple', 'pink']
+const colors = ['red', 'orange', 'green', 'cyan', 'blue', 'purple', 'pink'];
 
 interface Data {
-  id: string
-  color?: string
+  id: string;
+  color?: string;
 }
 
 const newData = (i: number): Data => ({
   id: uuid(),
   color: colors[i % colors.length],
-})
+});
 
 /**
  * Item
  */
 interface ItemProps {
-  item: Data
-  editing: boolean
-  onPressDelete: (item: Data) => void
+  item: Data;
+  editing: boolean;
+  onPressDelete: (item: Data) => void;
 }
 
 const Item = memo(({ item, editing, onPressDelete }: ItemProps) => {
@@ -119,8 +119,8 @@ const Item = memo(({ item, editing, onPressDelete }: ItemProps) => {
       <Text style={{ color: '#fff', fontSize: 18 }}>{item.color}</Text>
       {editing && <DeleteButton onPress={() => onPressDelete(item)} />}
     </View>
-  )
-})
+  );
+});
 
 const DeleteButton = memo(({ onPress }: { onPress: () => void }) => (
   <TouchableOpacity style={styles.delete} onPress={onPress}>
@@ -128,14 +128,14 @@ const DeleteButton = memo(({ onPress }: { onPress: () => void }) => (
       <Text style={{ color: '#fff' }}>x</Text>
     </View>
   </TouchableOpacity>
-))
+));
 
 /**
  * LockedItem
  */
 interface LockedItemProps {
-  editing: boolean
-  onPress: () => void
+  editing: boolean;
+  onPress: () => void;
 }
 
 const LockedItem = memo(({ editing, onPress }: LockedItemProps) => (
@@ -148,15 +148,15 @@ const LockedItem = memo(({ editing, onPress }: LockedItemProps) => (
       <Text style={{ fontSize: 48 }}>+</Text>
     </View>
   </TouchableOpacity>
-))
+));
 
 /**
  * Header
  */
 interface HeaderProps {
-  top: number
-  editing: boolean
-  onPress: () => void
+  top: number;
+  editing: boolean;
+  onPress: () => void;
 }
 
 const Header = memo(({ top, editing, onPress }: HeaderProps) => (
@@ -168,7 +168,7 @@ const Header = memo(({ top, editing, onPress }: HeaderProps) => (
       </TouchableOpacity>
     </View>
   </View>
-))
+));
 
 /**
  * UUID
@@ -176,19 +176,19 @@ const Header = memo(({ top, editing, onPress }: HeaderProps) => (
 const uuid = (): string => {
   // https://github.com/GoogleChrome/chrome-platform-analytics/blob/master/src/internal/identifier.js
   // const FORMAT: string = "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx";
-  let chars = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.split('')
+  const chars = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.split('');
   for (let i = 0, len = chars.length; i < len; i++) {
     switch (chars[i]) {
       case 'x':
-        chars[i] = Math.floor(Math.random() * 16).toString(16)
-        break
+        chars[i] = Math.floor(Math.random() * 16).toString(16);
+        break;
       case 'y':
-        chars[i] = (Math.floor(Math.random() * 4) + 8).toString(16)
-        break
+        chars[i] = (Math.floor(Math.random() * 4) + 8).toString(16);
+        break;
     }
   }
-  return chars.join('')
-}
+  return chars.join('');
+};
 
 /**
  * Style
@@ -238,4 +238,4 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'flex-end',
   },
-})
+});

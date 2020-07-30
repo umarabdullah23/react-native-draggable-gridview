@@ -1,9 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { Point } from './types';
-
-export function swap<T>(array: T[], i: number, j: number): T[] {
-  return array.splice(j, 1, array.splice(i, 1, array[j])[0]);
-}
+import { IPoint } from './types';
 
 export const getItemPosition = (
   i: number,
@@ -16,7 +12,7 @@ export const getItemPosition = (
     itemWidth: number;
     itemHeight: number;
   }
-): Point => ({
+): IPoint => ({
   x: (i % numColumns) * itemWidth,
   y: Math.floor(i / numColumns) * itemHeight,
 });

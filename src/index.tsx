@@ -1,9 +1,11 @@
-/* eslint-disable no-prototype-builtins */
-/**
- * react-native-draggable-gridview
- */
-
-import React, { memo, ReactNode, useCallback, useMemo, useRef } from 'react';
+import React, {
+  memo,
+  ReactNode,
+  useCallback,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   Animated,
   Easing,
@@ -23,8 +25,8 @@ import {
   View,
   ViewStyle,
 } from 'react-native';
-import { Point } from './types';
-import { getItemPosition, swap, useValueChangeEffect } from './util';
+import { IPoint } from './types';
+import { getItemPosition, useValueChangeEffect } from './util';
 
 const styles = StyleSheet.create({
   itemBox: {
@@ -42,7 +44,7 @@ const defaultSelectedStyle: ViewStyle = {
   shadowColor: '#000',
   shadowOpacity: 0.2,
   shadowRadius: 8,
-  zIndex: 1,
+  zIndex: 1000,
 };
 
 const defaultAnimationConfig: Omit<
@@ -60,7 +62,7 @@ const returnFalse = (): boolean => false;
 interface IItemState {
   key: string;
   index: number;
-  pos: Point;
+  pos: IPoint;
   posAnimated: Animated.ValueXY;
   opacity: Animated.Value;
 }
@@ -79,7 +81,7 @@ interface IState {
   numColumns: number;
   numRows: number;
   selectedKey: string | null;
-  startPoint: Point | null; // Starting position when dragging
+  startPoint: IPoint | null; // Starting position when dragging
   startPointOffset: number; // Offset for the starting point for scrolling
   width: number;
 }
@@ -122,6 +124,8 @@ function GridViewToMemo<T>({
   // state
   const windowWidth = useWindowDimensions().width;
 
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+
   const state = useRef<IState>({
     animationConfig,
     animationId: null,
@@ -132,7 +136,7 @@ function GridViewToMemo<T>({
     itemWidth: 0,
     numColumns,
     numRows: 0,
-    selectedKey: null,
+    selectedKey,
     startPoint: null,
     startPointOffset: 0,
     width: 0,
@@ -144,6 +148,7 @@ function GridViewToMemo<T>({
   state.width = widthProp || windowWidth;
   state.itemWidth = itemWidthProp || state.width / numColumns;
   state.itemHeight = itemHeightProp || state.itemWidth;
+  state.selectedKey = selectedKey;
 
   // item state
   const curItemStateMap = useMemo(() => {
@@ -154,6 +159,7 @@ function GridViewToMemo<T>({
     const keys = data.map((item, index) => {
       const key = keyExtractor(item);
       const prevItemState = prevMap[key];
+      // eslint-disable-next-line no-prototype-builtins
       if (prevMap.hasOwnProperty(key) && prevItemState?.index === index) {
         map[key] = prevMap[key];
       } else {
@@ -224,7 +230,7 @@ function GridViewToMemo<T>({
 
     state.startPoint = getItemPosition(index, state);
     state.startPointOffset = 0;
-    state.selectedKey = key;
+    setSelectedKey((state.selectedKey = key));
 
     if (onDragStart) onDragStart(key, index);
   };
@@ -239,12 +245,12 @@ function GridViewToMemo<T>({
         itemWidth,
         numColumns: numCols,
         numRows,
-        selectedKey,
+        selectedKey: selKey,
       } = state;
 
-      if (animations.length || !selectedKey) return;
+      if (animations.length || !selKey) return;
 
-      const itemState = itemStateMap[selectedKey];
+      const itemState = itemStateMap[selKey];
       if (!itemState) return;
 
       let col = Math.floor((x + itemWidth / 2) / itemWidth);
@@ -258,18 +264,22 @@ function GridViewToMemo<T>({
 
       if (newIndex === prevIndex) return;
 
-      swap(keys, newIndex, prevIndex);
-      itemState.index = newIndex;
+      const newKeys = keys.slice();
+      newKeys.splice(prevIndex, 1);
+      newKeys.splice(newIndex, 0, selKey);
+      state.keys = newKeys;
 
-      const anims = keys
+      const anims = newKeys
         .map((key, i) => {
           const iState = itemStateMap[key];
           if (iState) {
             iState.index = i;
+            const pos = getItemPosition(i, state);
+            iState.pos = pos;
             if (i !== newIndex) {
               return Animated.timing(iState.posAnimated, {
                 ...state.animationConfig,
-                toValue: getItemPosition(i, state),
+                toValue: pos,
               });
             }
           }
@@ -294,14 +304,14 @@ function GridViewToMemo<T>({
       const {
         itemStateMap,
         layout,
-        selectedKey,
+        selectedKey: selKey,
         startPoint,
         startPointOffset,
       } = state;
 
-      if (!layout || !selectedKey || !startPoint) return;
+      if (!layout || !selKey || !startPoint) return;
 
-      const itemState = itemStateMap[selectedKey];
+      const itemState = itemStateMap[selKey];
       if (!itemState) return;
 
       state.moveY = moveY - layout.y;
@@ -317,7 +327,12 @@ function GridViewToMemo<T>({
   );
 
   const handleRelease = useCallback((): void => {
-    const { startPoint, animationId, selectedKey, itemStateMap } = state;
+    const {
+      startPoint,
+      animationId,
+      selectedKey: selKey,
+      itemStateMap,
+    } = state;
     if (!startPoint) return;
 
     state.startPoint = null;
@@ -327,10 +342,10 @@ function GridViewToMemo<T>({
       state.animationId = null;
     }
 
-    if (!selectedKey) return;
-    state.selectedKey = null;
+    if (!selKey) return;
+    setSelectedKey((state.selectedKey = null));
 
-    const itemState = itemStateMap[selectedKey];
+    const itemState = itemStateMap[selKey];
     if (!itemState) return;
 
     const anim = Animated.timing(itemState.posAnimated, {
@@ -340,20 +355,25 @@ function GridViewToMemo<T>({
     });
 
     state.animations.push(anim);
-
     anim.start(() => {
       state.animations = state.animations.filter((a) => a !== anim);
-      if (onSort) onSort(state.keys);
+      onSort(state.keys);
     });
   }, [onSort, state]);
 
   // handleMoveShouldSetPanResponder
 
   const animate = useCallback((): void => {
-    const { contentOffset, selectedKey, moveY, layout, itemStateMap } = state;
-    if (!selectedKey || moveY == null || !layout) return;
+    const {
+      contentOffset,
+      selectedKey: selKey,
+      moveY,
+      layout,
+      itemStateMap,
+    } = state;
+    if (!selKey || moveY == null || !layout) return;
 
-    const itemState = itemStateMap[selectedKey];
+    const itemState = itemStateMap[selKey];
     if (!itemState) return;
 
     const itemHeightHalf = state.itemHeight / 2;
@@ -425,7 +445,7 @@ function GridViewToMemo<T>({
       ref={scrollViewRef}
       onLayout={handleLayout}
       onScroll={handleScroll}
-      scrollEnabled={!state.selectedKey}
+      scrollEnabled={!selectedKey}
       scrollEventThrottle={16}
     >
       <View
@@ -450,7 +470,7 @@ function GridViewToMemo<T>({
                 transform: itemState.posAnimated.getTranslateTransform(),
                 opacity: itemState.opacity,
               },
-              key === state.selectedKey && selectedStyle,
+              key === selectedKey && selectedStyle,
             ]}
           >
             <TouchableOpacity
