@@ -1,463 +1,474 @@
+/* eslint-disable no-prototype-builtins */
 /**
  * react-native-draggable-gridview
  */
 
-import React, { memo, useRef, useState } from 'react'
-import { Dimensions, LayoutRectangle } from 'react-native'
-import { View, ViewStyle, TouchableOpacity } from 'react-native'
-import { Animated, Easing, EasingFunction } from 'react-native'
-import { ScrollView, ScrollViewProps, PanResponder } from 'react-native'
-import _ from 'lodash'
+import React, { memo, ReactNode, useCallback, useMemo, useRef } from 'react';
+import {
+  Animated,
+  Easing,
+  GestureResponderEvent,
+  LayoutChangeEvent,
+  LayoutRectangle,
+  NativeScrollEvent,
+  NativeScrollPoint,
+  NativeSyntheticEvent,
+  PanResponder,
+  PanResponderGestureState,
+  ScrollView,
+  ScrollViewProps,
+  StyleSheet,
+  TouchableOpacity,
+  useWindowDimensions,
+  View,
+  ViewStyle,
+} from 'react-native';
+import { Point } from './types';
+import { getItemPosition, swap, useValueChangeEffect } from './util';
 
-const { width: screenWidth } = Dimensions.get('window')
+const styles = StyleSheet.create({
+  itemBox: {
+    position: 'absolute',
+  },
+  itemTouch: {
+    flex: 1,
+  },
+});
 
-interface GridViewProps extends ScrollViewProps {
-  numColumns?: number
-  containerMargin?: ContainerMargin
-  width?: number
-  data: any[]
-  activeOpacity?: number
-  delayLongPress?: number
-  selectedStyle?: ViewStyle
-  animationConfig?: AnimationConfig
-  keyExtractor?: (item: any) => string
-  renderItem: (item: any, index?: number) => JSX.Element
-  renderLockedItem?: (item: any, index?: number) => JSX.Element
-  locked?: (item: any, index?: number) => boolean
-  onBeginDragging?: () => void
-  onPressCell?: (item: any, index?: number) => void
-  onReleaseCell?: (data: any[]) => void
-  onEndAddAnimation?: (item: any) => void
-  onEndDeleteAnimation?: (item: any) => void
+const defaultAnimationDuration = 150;
+
+const defaultSelectedStyle: ViewStyle = {
+  elevation: 10,
+  shadowColor: '#000',
+  shadowOpacity: 0.2,
+  shadowRadius: 8,
+  zIndex: 1,
+};
+
+const defaultAnimationConfig: Omit<
+  Animated.TimingAnimationConfig,
+  'toValue'
+> = {
+  easing: Easing.ease,
+  duration: defaultAnimationDuration,
+  useNativeDriver: true,
+};
+
+const returnTrue = (): boolean => true;
+const returnFalse = (): boolean => false;
+
+interface IItemState {
+  key: string;
+  index: number;
+  pos: Point;
+  posAnimated: Animated.ValueXY;
+  opacity: Animated.Value;
 }
 
-interface AnimationConfig {
-  isInteraction?: boolean
-  useNativeDriver: boolean
-  easing?: EasingFunction
-  duration?: number
-  delay?: number
+interface IState {
+  animationConfig: Omit<Animated.TimingAnimationConfig, 'toValue'>;
+  animationId: number | null;
+  contentOffset?: NativeScrollPoint;
+  animations: Animated.CompositeAnimation[];
+  itemHeight: number;
+  itemStateMap: Record<string, IItemState | undefined>;
+  keys: string[];
+  itemWidth: number;
+  layout?: LayoutRectangle;
+  moveY?: number; // The position for dragging
+  numColumns: number;
+  numRows: number;
+  selectedKey: string | null;
+  startPoint: Point | null; // Starting position when dragging
+  startPointOffset: number; // Offset for the starting point for scrolling
+  width: number;
 }
 
-interface ContainerMargin {
-  top?: number
-  bottom?: number
-  left?: number
-  right?: number
+export interface IGridViewProps<T> extends ScrollViewProps {
+  activeOpacity?: number;
+  animationConfig?: Omit<Animated.TimingAnimationConfig, 'toValue'>;
+  data: T[];
+  delayLongPress?: number;
+  itemHeight?: number;
+  itemWidth?: number;
+  keyExtractor: (item: T) => string;
+  numColumns?: number;
+  onDragStart?: (key: string, index: number) => void;
+  onPressItem?: (event: GestureResponderEvent, item: T, index: number) => void;
+  onSort: (keys: string[]) => void;
+  renderItem: (data: { item: T; key: string; index: number }) => ReactNode;
+  selectedStyle?: ViewStyle;
+  width?: number;
 }
 
-interface Point {
-  x: number
-  y: number
-}
+function GridViewToMemo<T>({
+  activeOpacity = 0.5,
+  animationConfig = defaultAnimationConfig,
+  data,
+  delayLongPress = 500,
+  itemHeight: itemHeightProp,
+  itemWidth: itemWidthProp,
+  keyExtractor,
+  numColumns = 1,
+  onDragStart,
+  onPressItem,
+  onSort,
+  renderItem,
+  selectedStyle = defaultSelectedStyle,
+  width: widthProp,
+}: IGridViewProps<T>): JSX.Element {
+  const scrollViewRef = useRef<ScrollView>(null);
 
-interface Item {
-  item: any
-  pos: Animated.ValueXY
-  opacity: Animated.Value
-}
+  // state
+  const windowWidth = useWindowDimensions().width;
 
-interface State {
-  scrollView?: ScrollView
-  frame?: LayoutRectangle
-  contentOffset: number
-  numRows?: number
-  cellSize?: number
-  grid: Point[]
-  items: Item[]
-  isAnimating: boolean
-  animationId?: number
-  startPoint?: Point // Starting position when dragging
-  startPointOffset?: number // Offset for the starting point for scrolling
-  move?: number // The position for dragging
-}
-
-const GridView = memo((props: GridViewProps) => {
-  const {
-    data,
-    keyExtractor,
-    renderItem,
-    renderLockedItem,
-    locked,
-    onBeginDragging,
-    onPressCell,
-    onReleaseCell,
-    onEndAddAnimation,
-    onEndDeleteAnimation,
-    ...rest
-  } = props
-  const numColumns = rest.numColumns || 1
-  const top = rest.containerMargin?.top || 0
-  const bottom = rest.containerMargin?.bottom || 0
-  const left = rest.containerMargin?.left || 0
-  const right = rest.containerMargin?.right || 0
-  const width = rest.width || screenWidth
-  const activeOpacity = rest.activeOpacity || 0.5
-  const delayLongPress = rest.delayLongPress || 500
-  const selectedStyle = rest.selectedStyle || {
-    shadowColor: '#000',
-    shadowRadius: 8,
-    shadowOpacity: 0.2,
-    elevation: 10,
-  }
-
-  const [selectedItem, setSelectedItem] = useState<Item>(null)
-  const self = useRef<State>({
-    contentOffset: 0,
-    grid: [],
-    items: [],
-    isAnimating: false,
+  const state = useRef<IState>({
+    animationConfig,
+    animationId: null,
+    animations: [],
+    itemHeight: 0,
+    itemStateMap: {},
+    keys: [],
+    itemWidth: 0,
+    numColumns,
+    numRows: 0,
+    selectedKey: null,
+    startPoint: null,
     startPointOffset: 0,
-  }).current
+    width: 0,
+  }).current;
 
-  //-------------------------------------------------- Preparing
-  const prepare = () => {
-    if (!data) return
-    // console.log('[GridView] prepare')
-    const diff = data.length - self.grid.length
-    if (Math.abs(diff) == 1) {
-      prepareAnimations(diff)
-    } else if (diff != 0) {
-      onUpdateGrid()
-    } else if (
-      _.findIndex(self.items, (v: Item, i: number) => v.item != data[i]) >= 0
-    ) {
-      onUpdateData()
-    }
-  }
+  state.animationConfig = animationConfig;
+  state.numColumns = numColumns;
+  state.numRows = Math.ceil(data.length / numColumns);
+  state.width = widthProp || windowWidth;
+  state.itemWidth = itemWidthProp || state.width / numColumns;
+  state.itemHeight = itemHeightProp || state.itemWidth;
 
-  const onUpdateGrid = () => {
-    // console.log('[GridView] onUpdateGrid')
-    const cellSize = (width - left - right) / numColumns
-    self.cellSize = cellSize
-    self.numRows = Math.ceil(data.length / numColumns)
-    const grid: Point[] = []
-    for (let i = 0; i < data.length; i++) {
-      const x = (i % numColumns) * cellSize
-      const y = Math.floor(i / numColumns) * cellSize
-      grid.push({ x, y })
-    }
-    self.grid = grid
-    onUpdateData()
-  }
+  // item state
+  const curItemStateMap = useMemo(() => {
+    const prevMap = state.itemStateMap;
+    const map = {} as Record<string, IItemState | undefined>;
 
-  const onUpdateData = () => {
-    // console.log('[GridView] onUpdateData')
-    const { grid } = self
-    self.items = data.map((item, i) => ({
-      item,
-      pos: new Animated.ValueXY(grid[i]),
-      opacity: new Animated.Value(1),
-    }))
-  }
-
-  const prepareAnimations = (diff: number) => {
-    const config: AnimationConfig = rest.animationConfig || {
-      easing: Easing.ease,
-      duration: 300,
-      useNativeDriver: true,
-    }
-    let animations: Animated.CompositeAnimation[]
-
-    const grid0 = self.grid
-    const items0 = self.items
-    onUpdateGrid()
-    const { grid, items } = self
-
-    const diffItem: Item = _.head(
-      _.differenceWith(
-        diff < 0 ? items0 : items,
-        diff < 0 ? items : items0,
-        (v1: Item, v2: Item) => v1.item == v2.item
-      )
-    )
-    // console.log('[GridView] diffItem', diffItem)
-
-    animations = (diff < 0 ? items0 : items).reduce((prev, curr, i) => {
-      let toValue: { x: number; y: number }
-
-      if (diff < 0) {
-        // Delete
-        const index = _.findIndex(items, { item: curr.item })
-        toValue = index < 0 ? grid0[i] : grid[index]
-        if (index < 0) {
-          prev.push(Animated.timing(curr.opacity, { toValue: 0, ...config }))
-        }
+    let changed = false;
+    const keys = data.map((item, index) => {
+      const key = keyExtractor(item);
+      const prevItemState = prevMap[key];
+      if (prevMap.hasOwnProperty(key) && prevItemState?.index === index) {
+        map[key] = prevMap[key];
       } else {
-        // Add
-        const index = _.findIndex(items0, { item: curr.item })
-        if (index >= 0) curr.pos.setValue(grid0[index])
-        toValue = grid[i]
-        if (diffItem.item == curr.item) {
-          curr.opacity.setValue(0)
-          prev.push(Animated.timing(curr.opacity, { toValue: 1, ...config }))
+        changed = true;
+        const pos = getItemPosition(index, state);
+        map[key] = {
+          ...prevItemState,
+          key,
+          index,
+          pos,
+          posAnimated: prevItemState?.posAnimated || new Animated.ValueXY(pos),
+          opacity: prevItemState?.opacity || new Animated.Value(1),
+        };
+      }
+      return key;
+    });
+
+    if (!changed) {
+      changed = Object.keys(prevMap).length !== data.length;
+    }
+
+    if (changed) {
+      state.keys = keys;
+      state.itemStateMap = map;
+      return map;
+    }
+
+    return prevMap;
+  }, [data, keyExtractor, state]);
+
+  useValueChangeEffect((newItemStateMap, prevItemStateMap) => {
+    const anims = Object.keys(newItemStateMap)
+      .map((key) => {
+        const itemState = newItemStateMap[key];
+        if (itemState && itemState !== prevItemStateMap?.[key]) {
+          return Animated.timing(itemState.posAnimated, {
+            ...state.animationConfig,
+            toValue: itemState.pos,
+          });
         }
-      }
+        return null;
+      })
+      .filter((x) => x) as Animated.CompositeAnimation[];
 
-      // Animation for position
-      prev.push(Animated.timing(curr.pos, { toValue, ...config }))
-      return prev
-    }, [])
+    const anim = Animated.parallel(anims);
+    state.animations.push(anim);
+    anim.start(() => {
+      state.animations = state.animations.filter((x) => x !== anim);
+    });
+  }, curItemStateMap);
 
-    if (diff < 0) {
-      self.items = items0
-      self.grid = grid0
-    }
-
-    self.isAnimating = true
-    Animated.parallel(animations).start(() => {
-      // console.log('[Gird] end animation')
-      self.isAnimating = false
-      if (diff < 0) {
-        self.items = items
-        self.grid = grid
-        onEndDeleteAnimation && onEndDeleteAnimation(diffItem.item)
-      } else {
-        onEndAddAnimation && onEndAddAnimation(diffItem.item)
-      }
-    })
-  }
-
-  prepare()
-
-  //-------------------------------------------------- Handller
-  const onLayout = ({
-    nativeEvent: { layout },
-  }: {
-    nativeEvent: { layout: LayoutRectangle }
-  }) => (self.frame = layout)
-
-  const animate = () => {
-    if (!selectedItem) return
-
-    const { move, frame, cellSize } = self
-    const s = cellSize / 2
-    let a = 0
-    if (move < top + s) {
-      a = Math.max(-s, move - (top + s)) // above
-    } else if (move > frame.height - bottom - s) {
-      a = Math.min(s, move - (frame.height - bottom - s)) // below
-    }
-    a && scroll((a / s) * 10) // scrolling
-
-    self.animationId = requestAnimationFrame(animate)
-  }
-
-  const scroll = (offset: number) => {
-    const { scrollView, cellSize, numRows, frame, contentOffset } = self
-    const max = cellSize * numRows - frame.height + top + bottom
-    const offY = Math.max(0, Math.min(max, contentOffset + offset))
-    const diff = offY - contentOffset
-    if (Math.abs(diff) > 0.2) {
-      // Set offset for the starting point of dragging
-      self.startPointOffset += diff
-      // Move the dragging cell
-      const { x: x0, y: y0 } = selectedItem.pos
-      const x = x0['_value']
-      const y = y0['_value'] + diff
-      selectedItem.pos.setValue({ x, y })
-      reorder(x, y)
-      scrollView.scrollTo({ y: offY, animated: false })
-    }
-  }
-
-  const onScroll = ({
-    nativeEvent: {
-      contentOffset: { y },
+  const handleLayout = useCallback(
+    (event: LayoutChangeEvent) => {
+      state.layout = event.nativeEvent.layout;
     },
-  }: {
-    nativeEvent: { contentOffset: { y: number } }
-  }) => (self.contentOffset = y)
+    [state]
+  );
 
-  const onLongPress = (item: string, index: number, position: Point) => {
-    if (self.isAnimating) return
+  const handleScroll = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      state.contentOffset = event.nativeEvent.contentOffset;
+    },
+    [state]
+  );
 
-    // console.log('[GridView] onLongPress', item, index)
-    self.startPoint = position
-    self.startPointOffset = 0
-    setSelectedItem(self.items[index])
-    onBeginDragging && onBeginDragging()
-  }
+  const handleLongPress = (key: string, index: number): void => {
+    if (state.animations.length) return;
 
-  const reorder = (x: number, y: number) => {
-    if (self.isAnimating) return
+    state.startPoint = getItemPosition(index, state);
+    state.startPointOffset = 0;
+    state.selectedKey = key;
 
-    const { numRows, cellSize, grid, items } = self
+    if (onDragStart) onDragStart(key, index);
+  };
 
-    let colum = Math.floor((x + cellSize / 2) / cellSize)
-    colum = Math.max(0, Math.min(numColumns, colum))
+  const reorder = useCallback(
+    (x: number, y: number): void => {
+      const {
+        animations,
+        itemHeight,
+        itemStateMap,
+        keys,
+        itemWidth,
+        numColumns: numCols,
+        numRows,
+        selectedKey,
+      } = state;
 
-    let row = Math.floor((y + cellSize / 2) / cellSize)
-    row = Math.max(0, Math.min(numRows, row))
+      if (animations.length || !selectedKey) return;
 
-    const index = Math.min(items.length - 1, colum + row * numColumns)
-    const isLocked = locked && locked(items[index].item, index)
-    const dataIndex = items.indexOf(selectedItem)
+      const itemState = itemStateMap[selectedKey];
+      if (!itemState) return;
 
-    if (isLocked || dataIndex == index) return
+      let col = Math.floor((x + itemWidth / 2) / itemWidth);
+      col = Math.max(0, Math.min(numCols, col));
 
-    swap(items, index, dataIndex)
-    self.isAnimating = true
+      let row = Math.floor((y + itemHeight / 2) / itemHeight);
+      row = Math.max(0, Math.min(numRows, row));
 
-    const animations = items.reduce((prev, curr, i) => {
-      index != i &&
-        prev.push(
-          Animated.timing(curr.pos, {
-            toValue: grid[i],
-            easing: Easing.ease,
-            duration: 200,
-            useNativeDriver: true,
-          })
-        )
-      return prev
-    }, [] as Animated.CompositeAnimation[])
+      const newIndex = Math.min(keys.length - 1, row * numCols + col);
+      const prevIndex = itemState.index;
 
-    Animated.parallel(animations).start(() => {
-      self.isAnimating = false
-    })
-  }
+      if (newIndex === prevIndex) return;
 
-  //-------------------------------------------------- PanResponder
-  const onMoveShouldSetPanResponder = (): boolean => {
-    if (!self.startPoint) return false
-    const shoudSet = selectedItem != null
-    if (shoudSet) {
-      // console.log('[GridView] onMoveShouldSetPanResponder animate')
-      animate()
-    }
-    return shoudSet
-  }
+      swap(keys, newIndex, prevIndex);
+      itemState.index = newIndex;
 
-  const onMove = (
-    event,
-    { moveY, dx, dy }: { moveY: number; dx: number; dy: number }
-  ) => {
-    // console.log('[GridView] onMove', dx, dy, moveY)
-    const { startPoint, startPointOffset, frame } = self
-    self.move = moveY - frame.y
-    let { x, y } = startPoint
-    x += dx
-    y += dy + startPointOffset
-    selectedItem.pos.setValue({ x, y })
-    reorder(x, y)
-  }
+      const anims = keys
+        .map((key, i) => {
+          const iState = itemStateMap[key];
+          if (iState) {
+            iState.index = i;
+            if (i !== newIndex) {
+              return Animated.timing(iState.posAnimated, {
+                ...state.animationConfig,
+                toValue: getItemPosition(i, state),
+              });
+            }
+          }
+          return null;
+        })
+        .filter((a) => a) as Animated.CompositeAnimation[];
 
-  const onRelease = () => {
-    if (!self.startPoint) return
-    // console.log('[GridView] onRelease')
-    cancelAnimationFrame(self.animationId)
-    self.animationId = undefined
-    self.startPoint = undefined
-    const { grid, items } = self
-    const index = items.indexOf(selectedItem)
-    index >= 0 &&
-      Animated.timing(selectedItem.pos, {
-        toValue: grid[index],
-        easing: Easing.out(Easing.quad),
-        duration: 200,
-        useNativeDriver: true,
-      }).start(onEndRelease)
-  }
+      const anim = Animated.parallel(anims);
+      state.animations.push(anim);
+      anim.start(() => {
+        state.animations = state.animations.filter((a) => a !== anim);
+      });
+    },
+    [state]
+  );
 
-  const onEndRelease = () => {
-    // console.log('[GridView] onEndRelease')
-    onReleaseCell && onReleaseCell(self.items.map((v) => v.item))
-    setSelectedItem(undefined)
-  }
+  const handleMove = useCallback(
+    (
+      _event: GestureResponderEvent,
+      { moveY, dx, dy }: PanResponderGestureState
+    ): void => {
+      const {
+        itemStateMap,
+        layout,
+        selectedKey,
+        startPoint,
+        startPointOffset,
+      } = state;
 
-  const panResponder = PanResponder.create({
-    onStartShouldSetPanResponder: () => true,
-    onStartShouldSetPanResponderCapture: () => false,
-    onMoveShouldSetPanResponder: onMoveShouldSetPanResponder,
-    onMoveShouldSetPanResponderCapture: onMoveShouldSetPanResponder,
-    onShouldBlockNativeResponder: () => false,
-    onPanResponderTerminationRequest: () => false,
-    onPanResponderMove: onMove,
-    onPanResponderRelease: onRelease,
-    onPanResponderEnd: onRelease,
-  })
+      if (!layout || !selectedKey || !startPoint) return;
 
-  //-------------------------------------------------- 描画
-  const _renderItem = (value: Item, index: number) => {
-    const { item, pos, opacity } = value
-    // console.log('[GridView] renderItem', index, id)
-    const { cellSize, grid } = self
-    const p = grid[index]
-    const isLocked = locked && locked(item, index)
-    const key =
-      (keyExtractor && keyExtractor(item)) ||
-      (typeof item == 'string' ? item : `${index}`)
-    let style: ViewStyle = {
-      position: 'absolute',
-      width: cellSize,
-      height: cellSize,
+      const itemState = itemStateMap[selectedKey];
+      if (!itemState) return;
+
+      state.moveY = moveY - layout.y;
+
+      const x = startPoint.x + dx;
+      const y = startPoint.y + dy + (startPointOffset || 0);
+
+      itemState.posAnimated.setValue({ x, y });
+
+      reorder(x, y);
+    },
+    [reorder, state]
+  );
+
+  const handleRelease = useCallback((): void => {
+    const { startPoint, animationId, selectedKey, itemStateMap } = state;
+    if (!startPoint) return;
+
+    state.startPoint = null;
+
+    if (animationId) {
+      cancelAnimationFrame(animationId);
+      state.animationId = null;
     }
 
-    if (!isLocked && value == selectedItem)
-      style = { zIndex: 1, ...style, ...selectedStyle }
+    if (!selectedKey) return;
+    state.selectedKey = null;
 
-    return isLocked ? (
-      <View key={key} style={[style, { left: p.x, top: p.y }]}>
-        {renderLockedItem(item, index)}
-      </View>
-    ) : (
-      <Animated.View
-        {...panResponder.panHandlers}
-        key={key}
-        style={[
-          style,
-          {
-            transform: pos.getTranslateTransform(),
-            opacity,
-          },
-        ]}
-      >
-        <TouchableOpacity
-          style={{ flex: 1 }}
-          activeOpacity={activeOpacity}
-          delayLongPress={delayLongPress}
-          onLongPress={() => onLongPress(item, index, p)}
-          onPress={() => onPressCell && onPressCell(item, index)}
-        >
-          {renderItem(item, index)}
-        </TouchableOpacity>
-      </Animated.View>
-    )
-  }
+    const itemState = itemStateMap[selectedKey];
+    if (!itemState) return;
 
-  // console.log('[GridView] render', data.length)
+    const anim = Animated.timing(itemState.posAnimated, {
+      ...state.animationConfig,
+      toValue: itemState.pos,
+      easing: Easing.out(Easing.quad),
+    });
+
+    state.animations.push(anim);
+
+    anim.start(() => {
+      state.animations = state.animations.filter((a) => a !== anim);
+      if (onSort) onSort(state.keys);
+    });
+  }, [onSort, state]);
+
+  // handleMoveShouldSetPanResponder
+
+  const animate = useCallback((): void => {
+    const { contentOffset, selectedKey, moveY, layout, itemStateMap } = state;
+    if (!selectedKey || moveY == null || !layout) return;
+
+    const itemState = itemStateMap[selectedKey];
+    if (!itemState) return;
+
+    const itemHeightHalf = state.itemHeight / 2;
+
+    let a = 0;
+    if (moveY < itemHeightHalf) {
+      a = Math.max(-itemHeightHalf, moveY - itemHeightHalf); // above
+    } else if (moveY > layout.height - itemHeightHalf) {
+      a = Math.min(itemHeightHalf, moveY - (layout.height - itemHeightHalf)); // below
+    }
+
+    if (a) {
+      const offset = (a / itemHeightHalf) * 10;
+
+      const contentOffsetY = contentOffset?.y || 0;
+      const maxY = state.itemHeight * state.numRows - layout.height;
+      const offY = Math.max(0, Math.min(maxY, contentOffsetY + offset));
+      const diff = offY - contentOffsetY;
+      if (Math.abs(diff) > 0.2) {
+        // Set offset for the starting point of dragging
+        state.startPointOffset += diff;
+        // Move the dragging cell
+        const { x: x0, y: y0 } = itemState.posAnimated;
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any, no-underscore-dangle
+        const x = (x0 as any)._value as number;
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any, no-underscore-dangle, @typescript-eslint/restrict-plus-operands
+        const y = ((y0 as any)._value + diff) as number;
+        itemState.posAnimated.setValue({ x, y });
+        reorder(x, y);
+        scrollViewRef.current?.scrollTo({ y: offY, animated: false });
+      }
+    }
+
+    state.animationId = requestAnimationFrame(animate);
+  }, [reorder, state]);
+
+  const handleMoveShouldSetPanResponder = useCallback(() => {
+    if (!state.startPoint) return false;
+
+    const shoudSet = state.selectedKey != null;
+    if (shoudSet) animate();
+
+    return shoudSet;
+  }, [animate, state]);
+
+  // pan responder
+
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: handleMoveShouldSetPanResponder,
+        onMoveShouldSetPanResponderCapture: handleMoveShouldSetPanResponder,
+        onPanResponderEnd: handleRelease,
+        onPanResponderMove: handleMove,
+        onPanResponderRelease: handleRelease,
+        onPanResponderTerminationRequest: returnFalse,
+        onShouldBlockNativeResponder: returnFalse,
+        onStartShouldSetPanResponder: returnTrue,
+        onStartShouldSetPanResponderCapture: returnFalse,
+      }),
+    [handleMove, handleMoveShouldSetPanResponder, handleRelease]
+  );
+
+  // -------------------------------------------------- 描画
+
   return (
     <ScrollView
       // {...rest}
-      ref={(ref) => (self.scrollView = ref)}
-      onLayout={onLayout}
-      onScroll={onScroll}
-      scrollEnabled={!selectedItem}
+      ref={scrollViewRef}
+      onLayout={handleLayout}
+      onScroll={handleScroll}
+      scrollEnabled={!state.selectedKey}
       scrollEventThrottle={16}
-      contentContainerStyle={{
-        marginTop: top,
-        marginBottom: bottom,
-        marginLeft: left,
-        marginRight: right,
-      }}
     >
       <View
         style={{
-          height: top + self.numRows * self.cellSize + bottom,
+          height: state.numRows * state.itemHeight,
         }}
       />
-      {self.items.map((v, i) => _renderItem(v, i))}
+      {data.map((item, index) => {
+        const key = keyExtractor(item);
+        const itemState = curItemStateMap[key];
+        if (!itemState) return null;
+
+        return (
+          <Animated.View
+            {...panResponder.panHandlers}
+            key={key}
+            style={[
+              styles.itemBox,
+              {
+                width: state.itemWidth,
+                height: state.itemHeight,
+                transform: itemState.posAnimated.getTranslateTransform(),
+                opacity: itemState.opacity,
+              },
+              key === state.selectedKey && selectedStyle,
+            ]}
+          >
+            <TouchableOpacity
+              style={styles.itemTouch}
+              activeOpacity={activeOpacity}
+              delayLongPress={delayLongPress}
+              onLongPress={() => handleLongPress(key, index)}
+              onPress={
+                onPressItem && ((event) => onPressItem(event, item, index))
+              }
+            >
+              {renderItem({ item, key, index })}
+            </TouchableOpacity>
+          </Animated.View>
+        );
+      })}
     </ScrollView>
-  )
-})
+  );
+}
 
-/**
- * swap
- * @param array
- * @param i
- * @param j
- */
-const swap = (array: any[], i: number, j: number) =>
-  array.splice(j, 1, array.splice(i, 1, array[j])[0])
-
-export default GridView
+export const GridView = memo(GridViewToMemo) as typeof GridViewToMemo;

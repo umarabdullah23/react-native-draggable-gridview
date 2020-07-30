@@ -1,0 +1,10 @@
+**/*.d.ts
+*.config.js
+.vscode/
+__tests__/
+android/
+archive/
+graphqlTypes/
+ios/
+node_modules/
+src/@types/
