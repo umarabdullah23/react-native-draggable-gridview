@@ -441,16 +441,16 @@ function GridViewToMemo<T>({
 
   return (
     <ScrollView
-      // {...rest}
       ref={scrollViewRef}
       onLayout={handleLayout}
       onScroll={handleScroll}
       scrollEnabled={!selectedKey}
       scrollEventThrottle={16}
+      showsVerticalScrollIndicator={false}
     >
       <View
         style={{
-          height: state.numRows * state.itemHeight,
+          height: state.numRows * state.itemHeight + 100,
         }}
       />
       {data.map((item, index) => {
@@ -460,12 +460,12 @@ function GridViewToMemo<T>({
 
         return (
           <Animated.View
-            {...panResponder.panHandlers}
+            {...(item?.data && panResponder.panHandlers)}
             key={key}
             style={[
               styles.itemBox,
               {
-                width: state.itemWidth,
+                width: state.itemWidth - 5,
                 height: state.itemHeight,
                 transform: itemState.posAnimated.getTranslateTransform(),
                 opacity: itemState.opacity,
@@ -474,7 +474,7 @@ function GridViewToMemo<T>({
             ]}
           >
             <TouchableOpacity
-              style={styles.itemTouch}
+              // style={styles.itemTouch}
               activeOpacity={activeOpacity}
               delayLongPress={delayLongPress}
               onLongPress={() => handleLongPress(key, index)}
