@@ -449,7 +449,7 @@ function GridViewToMemo<T>({
       onScroll={handleScroll}
       scrollEnabled={!selectedKey}
       scrollEventThrottle={16}
-      style={{paddingTop: 20, marginBottom:'12%'}}
+      style={{paddingTop: 20, marginBottom:'3%'}}
       contentContainerStyle={{height: Dimensions.get('screen').height + 70}}
       showsVerticalScrollIndicator={false}
     >
