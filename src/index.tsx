@@ -1,7 +1,10 @@
 import React, {
+  ForwardedRef,
+  forwardRef,
   memo,
   ReactNode,
   useCallback,
+  useImperativeHandle,
   useMemo,
   useRef,
   useState,
@@ -105,24 +108,33 @@ export interface IGridViewProps<T> extends ScrollViewProps {
 }
 
 function GridViewToMemo<T>({
-  activeOpacity = 0.5,
-  animationConfig = defaultAnimationConfig,
-  data,
-  delayLongPress = 500,
-  itemHeight: itemHeightProp,
-  itemWidth: itemWidthProp,
-  keyExtractor,
-  numColumns = 1,
-  onDragStart,
-  onPressItem,
-  onSort,
-  renderItem,
-  selectedStyle = defaultSelectedStyle,
-  width: widthProp,
-}: IGridViewProps<T>): JSX.Element {
+    activeOpacity = 0.5,
+    animationConfig = defaultAnimationConfig,
+    data,
+    delayLongPress = 500,
+    itemHeight: itemHeightProp,
+    itemWidth: itemWidthProp,
+    keyExtractor,
+    numColumns = 1,
+    onDragStart,
+    onPressItem,
+    onSort,
+    renderItem,
+    selectedStyle = defaultSelectedStyle,
+    width: widthProp,
+  }: IGridViewProps<T>,     
+  ref: ForwardedRef<any>): JSX.Element {
   const scrollViewRef = useRef<ScrollView>(null);
 
+  useImperativeHandle(ref, () => {
+    return {
+      scrollTo(params: {x?: number, y?: number }) {
+        scrollViewRef?.current?.scrollTo(params);
+      } 
+    }
+  })
   // state
+
   const windowWidth = useWindowDimensions().width;
 
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
@@ -493,4 +505,4 @@ function GridViewToMemo<T>({
   );
 }
 
-export const GridView = memo(GridViewToMemo) as typeof GridViewToMemo;
+export const GridView = memo(forwardRef(GridViewToMemo)) as typeof GridViewToMemo;
