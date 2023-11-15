@@ -8,6 +8,7 @@ import React, {
 } from 'react';
 import {
   Animated,
+  Dimensions,
   Easing,
   GestureResponderEvent,
   LayoutChangeEvent,
@@ -361,7 +362,6 @@ function GridViewToMemo<T>({
     });
   }, [onSort, state]);
 
-  // handleMoveShouldSetPanResponder
 
   const animate = useCallback((): void => {
     const {
@@ -371,7 +371,8 @@ function GridViewToMemo<T>({
       layout,
       itemStateMap,
     } = state;
-    if (!selKey || moveY == null || !layout) return;
+    
+    if (!selKey) return;
 
     const itemState = itemStateMap[selKey];
     if (!itemState) return;
@@ -392,6 +393,7 @@ function GridViewToMemo<T>({
       const maxY = state.itemHeight * state.numRows - layout.height;
       const offY = Math.max(0, Math.min(maxY, contentOffsetY + offset));
       const diff = offY - contentOffsetY;
+     
       if (Math.abs(diff) > 0.2) {
         // Set offset for the starting point of dragging
         state.startPointOffset += diff;
@@ -403,6 +405,7 @@ function GridViewToMemo<T>({
         const y = ((y0 as any)._value + diff) as number;
         itemState.posAnimated.setValue({ x, y });
         reorder(x, y);
+        
         scrollViewRef.current?.scrollTo({ y: offY, animated: false });
       }
     }
@@ -446,14 +449,13 @@ function GridViewToMemo<T>({
       onScroll={handleScroll}
       scrollEnabled={!selectedKey}
       scrollEventThrottle={16}
+      style={{paddingTop: 20, marginBottom:'12%'}}
+      contentContainerStyle={{height: Dimensions.get('screen').height + 70}}
       showsVerticalScrollIndicator={false}
     >
-      <View
-        style={{
-          height: state.numRows * state.itemHeight + 100,
-        }}
-      />
+    
       {data.map((item, index) => {
+        
         const key = keyExtractor(item);
         const itemState = curItemStateMap[key];
         if (!itemState) return null;
