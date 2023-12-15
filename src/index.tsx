@@ -105,6 +105,7 @@ export interface IGridViewProps<T> extends ScrollViewProps {
   renderItem: (data: { item: T; key: string; index: number }) => ReactNode;
   selectedStyle?: ViewStyle;
   width?: number;
+  scrollEnabled?: boolean,
 }
 
 function GridViewToMemo<T>({
@@ -122,6 +123,7 @@ function GridViewToMemo<T>({
     renderItem,
     selectedStyle = defaultSelectedStyle,
     width: widthProp,
+    scrollEnabled,
   }: IGridViewProps<T>,     
   ref: ForwardedRef<any>): JSX.Element {
   const scrollViewRef = useRef<ScrollView>(null);
@@ -459,7 +461,7 @@ function GridViewToMemo<T>({
       ref={scrollViewRef}
       onLayout={handleLayout}
       onScroll={handleScroll}
-      scrollEnabled={!selectedKey}
+      scrollEnabled={scrollEnabled && !selectedKey}
       scrollEventThrottle={16}
       style={{paddingTop: 20, marginBottom:'3%'}}
       contentContainerStyle={{height: Dimensions.get('screen').height + 70}}
